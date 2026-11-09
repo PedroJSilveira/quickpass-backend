@@ -65,8 +65,9 @@ class LocacaoFluxoTest extends ApiTestBase {
         vistoria(id, "CHECKIN", renter, dono, false);
         assertEquals("EM_DISPUTA", vistoria(id, "CHECKOUT", renter, dono, true).get("status").asText());
 
-        JsonNode d = call(HttpMethod.POST, "/api/reservas/" + id + "/avaria", dono,
-                Map.of("descricao", "Risco na porta", "qtdFotos", 2, "valorEstimado", 300), 201);
+        multipart("/api/reservas/" + id + "/avaria", dono, Map.of("descricao", "Risco na porta", "valorEstimado", 300), 400); // sem foto
+        JsonNode d = multipart("/api/reservas/" + id + "/avaria", dono, Map.of("descricao", "Risco na porta", "valorEstimado", 300), 201, imagens("fotos", 2));
+        assertEquals(2, d.get("avaria").get("qtdFotos").asInt());
         String did = d.get("id").asText();
         assertEquals("AGUARDANDO_CONTESTACAO", d.get("status").asText());
         assertEquals("RETIDA_EM_DISPUTA", get("/api/reservas/" + id, renter).get("caucao").get("status").asText());
@@ -75,7 +76,13 @@ class LocacaoFluxoTest extends ApiTestBase {
 
         // mediador não decide antes da contestação / análise
         call(HttpMethod.POST, "/api/admin/disputas/" + did + "/analise", admin, null, 400);
-        post("/api/disputas/" + did + "/contestacao", renter, Map.of("texto", "Já estava assim", "qtdEvidencias", 1));
+        // evidência da avaria: as partes baixam; um terceiro não
+        String fotoAvaria = d.get("avaria").get("fotos").get(0).get("url").asText();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(fotoAvaria).header("Authorization", "Bearer " + renter)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(fotoAvaria)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+        String intruso = novoUsuario("intruso@teste.com", List.of("LOCATARIO"), false, Map.of());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(fotoAvaria).header("Authorization", "Bearer " + intruso)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        multipart("/api/disputas/" + did + "/contestacao", renter, Map.of("texto", "Já estava assim"), 200, imagem("evidencias"));
         post("/api/admin/disputas/" + did + "/analise", admin, null);
 
         // captura parcial inválida é rejeitada; válida conclui a reserva

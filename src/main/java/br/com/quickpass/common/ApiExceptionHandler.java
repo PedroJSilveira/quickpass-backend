@@ -5,7 +5,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -27,6 +34,33 @@ public class ApiExceptionHandler {
         Map<String, String> campos = new LinkedHashMap<>();
         e.getBindingResult().getFieldErrors().forEach(f -> campos.putIfAbsent(f.getField(), f.getDefaultMessage()));
         return corpo(HttpStatus.BAD_REQUEST, "Dados inválidos.", campos);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> arquivoGrande(MaxUploadSizeExceededException e) {
+        return corpo(HttpStatus.PAYLOAD_TOO_LARGE, "Arquivo maior que o limite permitido.", null);
+    }
+
+    @ExceptionHandler({MultipartException.class, MissingServletRequestPartException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<Map<String, Object>> envioIncompleto(Exception e) {
+        String parte = e instanceof MissingServletRequestPartException m ? m.getRequestPartName()
+                : e instanceof MissingServletRequestParameterException p ? p.getParameterName() : null;
+        return corpo(HttpStatus.BAD_REQUEST, parte != null ? "Campo obrigatório ausente: " + parte + "." : "Envio de arquivo inválido (use multipart/form-data).", null);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> tipoNaoSuportado(HttpMediaTypeNotSupportedException e) {
+        return corpo(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Tipo de conteúdo não suportado: " + e.getContentType() + ".", null);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> metodoNaoSuportado(HttpRequestMethodNotSupportedException e) {
+        return corpo(HttpStatus.METHOD_NOT_ALLOWED, "Método não suportado nesta rota.", null);
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> semRota(NoResourceFoundException e) {
+        return corpo(HttpStatus.NOT_FOUND, "Rota não encontrada.", null);
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class, IllegalArgumentException.class})

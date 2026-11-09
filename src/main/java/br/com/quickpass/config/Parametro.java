@@ -37,7 +37,8 @@ public enum Parametro {
     EXP_RF09_ORCAMENTO(5000, true),
     EXP_RF09_PCT_TRATAMENTO(50, true),
     EXP_RF09_ATIVACAO_DIAS(30, true),
-    FOTOS_VISTORIA_OBRIGATORIAS(7, false);
+    FOTOS_VISTORIA_OBRIGATORIAS(7, false),
+    FOTOS_VEICULO_MINIMAS(6, true);
 
     public final double padrao;
     public final boolean provisorio;

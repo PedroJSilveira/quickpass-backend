@@ -5,6 +5,7 @@ import br.com.quickpass.config.*;
 import br.com.quickpass.domain.*;
 import br.com.quickpass.web.Dtos.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -25,9 +26,11 @@ public class CatalogService {
     private final AgendaService agenda;
     private final ReviewService reviews;
     private final DemandService demanda;
+    private final StorageService storage;
+    private final UsuarioService usuarios;
 
     public CatalogService(Store store, AppConfigService config, ClockService clock, EventBus bus, AgendaService agenda,
-                          ReviewService reviews, DemandService demanda) {
+                          ReviewService reviews, DemandService demanda, StorageService storage, UsuarioService usuarios) {
         this.store = store;
         this.config = config;
         this.clock = clock;
@@ -35,6 +38,8 @@ public class CatalogService {
         this.agenda = agenda;
         this.reviews = reviews;
         this.demanda = demanda;
+        this.storage = storage;
+        this.usuarios = usuarios;
     }
 
     // ───────────── consultas ─────────────
@@ -105,7 +110,7 @@ public class CatalogService {
         String iniciais = partes.length > 1 ? "" + partes[0].charAt(0) + partes[partes.length - 1].charAt(0) : "" + partes[0].charAt(0);
         var rep = reviews.reputacaoDoProprietario(v.proprietarioId).media();
         double notaDono = rep != null ? rep : (dono == null ? 0 : dono.nota);
-        return new VeiculoPublico(v.id, v.marca + " " + v.modelo + " " + v.ano, v.foto, v.marca, v.modelo, v.ano, v.categoria, v.diaria,
+        return new VeiculoPublico(v.id, v.marca + " " + v.modelo + " " + v.ano, v.foto, v.fotos.isEmpty() && v.foto != null ? List.of(v.foto) : List.copyOf(v.fotos), v.marca, v.modelo, v.ano, v.categoria, v.diaria,
                 v.local, v.distanciaKm, v.cambio, v.combustivel, v.lugares, v.km, v.consumo, v.proprietarioId, curto,
                 iniciais.toUpperCase(), notaDono, v.status, v.nota, v.locacoes, v.manutencao);
     }
@@ -116,7 +121,11 @@ public class CatalogService {
 
     // ───────────── cadastro / moderação ─────────────
 
-    public Veiculo cadastrar(Usuario dono, VeiculoReq r) {
+    /** Anúncio novo, com fotos (mínimo configurável) e documentos opcionais (CRLV, seguro). Exige KYC aprovado (RF02). */
+    public Veiculo cadastrar(Usuario dono, VeiculoReq r, List<MultipartFile> fotos, List<MultipartFile> documentos) {
+        if (!usuarios.verificarExpiracao(dono)) throw ApiException.proibido("Verificação de identidade (KYC) pendente: não é possível anunciar um veículo.");
+        int minimo = config.getInt(Parametro.FOTOS_VEICULO_MINIMAS);
+        if (StorageService.contar(fotos) < minimo) throw ApiException.regra("Envie ao menos %d fotos do veículo.".formatted(minimo));
         if (!PLACA.matcher(r.placa()).matches()) throw ApiException.regra("Placa inválida (use o padrão antigo ou Mercosul).");
         String placa = r.placa().toUpperCase().replace("-", "");
         boolean duplicada = store.veiculos.values().stream()
@@ -125,7 +134,6 @@ public class CatalogService {
         Veiculo v = new Veiculo();
         v.id = "V-" + store.proximo("veiculo", 100);
         v.titulo = r.marca() + " " + r.modelo() + " " + r.ano();
-        v.foto = r.foto();
         v.marca = r.marca();
         v.modelo = r.modelo();
         v.ano = r.ano();
@@ -144,6 +152,18 @@ public class CatalogService {
         v.status = StatusVeiculo.EM_ANALISE;
         v.docValidoAte = r.docValidoAte();
         if (r.manutencao() != null) v.manutencao = new ArrayList<>(r.manutencao());
+        // Arquivos só são gravados depois de todas as validações de negócio passarem.
+        List<Arquivo> salvas = storage.salvarTodos(fotos, CategoriaArquivo.VEICULO_FOTO, dono.id, null, false);
+        List<Arquivo> docs;
+        try {
+            docs = storage.salvarTodos(documentos, CategoriaArquivo.VEICULO_DOCUMENTO, dono.id, null, true);
+        } catch (RuntimeException e) {
+            salvas.forEach(a -> storage.remover(a.id));
+            throw e;
+        }
+        salvas.forEach(a -> v.fotos.add(a.getUrl()));
+        v.foto = v.fotos.get(0);
+        v.documentos = new ArrayList<>(docs);
         store.veiculos.put(v.id, v);
         bus.emitir("veiculo_listado", props("user_id", dono.id, "vehicle_id", v.id, "categoria", v.categoria.rotulo(), "regiao_aproximada", v.local));
         return v;
@@ -152,11 +172,31 @@ public class CatalogService {
     public Veiculo atualizar(Usuario dono, String id, VeiculoAtualizacaoReq r) {
         Veiculo v = agenda.veiculoDoUsuario(dono, id);
         if (r.diaria() != null) v.diaria = r.diaria();
-        if (r.foto() != null) v.foto = r.foto();
         if (r.enderecoExato() != null) v.enderecoExato = r.enderecoExato();
         if (r.km() != null) v.km = r.km();
         if (r.docValidoAte() != null) v.docValidoAte = r.docValidoAte();
         if (r.manutencao() != null) v.manutencao = new ArrayList<>(r.manutencao());
+        return v;
+    }
+
+    /** Acrescenta fotos ao anúncio (o limite mínimo só vale no cadastro). */
+    public Veiculo adicionarFotos(Usuario dono, String id, List<MultipartFile> fotos) {
+        Veiculo v = agenda.veiculoDoUsuario(dono, id);
+        if (StorageService.contar(fotos) == 0) throw ApiException.regra("Envie ao menos uma foto.");
+        for (Arquivo a : storage.salvarTodos(fotos, CategoriaArquivo.VEICULO_FOTO, dono.id, null, false)) v.fotos.add(a.getUrl());
+        v.foto = v.fotos.get(0);
+        return v;
+    }
+
+    /** Remove uma foto do anúncio; o anúncio precisa manter ao menos uma. */
+    public Veiculo removerFoto(Usuario dono, String id, String arquivoId) {
+        Veiculo v = agenda.veiculoDoUsuario(dono, id);
+        String url = "/api/arquivos/" + arquivoId;
+        if (!v.fotos.contains(url)) throw ApiException.naoEncontrado("Foto não encontrada neste anúncio.");
+        if (v.fotos.size() <= 1) throw ApiException.regra("O anúncio precisa de ao menos uma foto.");
+        v.fotos.remove(url);
+        storage.remover(arquivoId);
+        v.foto = v.fotos.get(0);
         return v;
     }
 

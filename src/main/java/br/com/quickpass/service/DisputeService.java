@@ -5,6 +5,7 @@ import br.com.quickpass.config.*;
 import br.com.quickpass.domain.*;
 import br.com.quickpass.web.Dtos.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Comparator;
 import java.util.List;
@@ -26,9 +27,10 @@ public class DisputeService {
     private final EventBus bus;
     private final AuditService audit;
     private final NotificationService notificacoes;
+    private final StorageService storage;
 
     public DisputeService(Store store, BookingService booking, DepositService deposit, AppConfigService config, ClockService clock,
-                          EventBus bus, AuditService audit, NotificationService notificacoes) {
+                          EventBus bus, AuditService audit, NotificationService notificacoes, StorageService storage) {
         this.store = store;
         this.booking = booking;
         this.deposit = deposit;
@@ -37,6 +39,7 @@ public class DisputeService {
         this.bus = bus;
         this.audit = audit;
         this.notificacoes = notificacoes;
+        this.storage = storage;
     }
 
     public Disputa obrigatoria(String id) {
@@ -62,17 +65,18 @@ public class DisputeService {
     }
 
     /** Proprietário informa a avaria (DamageReport): exige descrição; retém a caução, não captura. */
-    public Disputa informarAvaria(Usuario dono, String reservaId, AvariaReq req) {
+    public Disputa informarAvaria(Usuario dono, String reservaId, AvariaReq req, List<MultipartFile> fotos) {
         Reserva r = booking.obrigatoria(reservaId);
         if (!booking.ehProprietario(dono, r)) throw ApiException.proibido("Apenas o proprietário do veículo informa a avaria.");
         if (r.status != StatusReserva.EM_DISPUTA) throw ApiException.regra("Avaria só pode ser informada em reserva em disputa (check-out com avaria).");
-        if (req.descricao().isBlank() || req.qtdFotos() < 1) throw ApiException.regra("Informe descrição e ao menos uma foto da avaria.");
+        if (req.descricao().isBlank() || StorageService.contar(fotos) < 1) throw ApiException.regra("Informe descrição e ao menos uma foto da avaria.");
         if (daReserva(reservaId) != null) throw ApiException.conflito("Já existe disputa para esta reserva.");
+        List<Arquivo> anexos = storage.salvarTodos(fotos, CategoriaArquivo.AVARIA_FOTO, dono.id, reservaId, false);
         Disputa d = new Disputa();
         d.id = "D-" + store.proximo("disputa", 1);
         d.reservaId = reservaId;
         d.status = StatusDisputa.ABERTA;
-        d.avaria = new Disputa.Avaria(req.descricao().trim(), req.qtdFotos(), clock.now(), req.valorEstimado());
+        d.avaria = new Disputa.Avaria(req.descricao().trim(), anexos.size(), clock.now(), req.valorEstimado(), anexos);
         d.contestarAte = clock.maisHoras(config.getInt(Parametro.PRAZO_CONTESTACAO_HORAS));
         store.disputas.put(d.id, d);
         audit.registrar(EntidadeAuditoria.DISPUTA, d.id, null, StatusDisputa.ABERTA, dono.id, null);
@@ -82,17 +86,18 @@ public class DisputeService {
         // O locatário é sempre notificado (transacional) e pode contestar.
         notificacoes.enviarTransacional(r.locatarioId, TipoNotificacao.AVARIA_INFORMADA, "Avaria informada",
                 "O proprietário informou uma avaria na locação %s. Você pode contestar até o prazo.".formatted(reservaId),
-                "/locacoes/" + reservaId + "/contestacao", props("dispute_id", d.id));
+                "/locacoes/" + reservaId + "/contestar", props("dispute_id", d.id));
         return d;
     }
 
-    public Disputa contestar(Usuario loc, String disputaId, ContestacaoReq req) {
+    public Disputa contestar(Usuario loc, String disputaId, ContestacaoReq req, List<MultipartFile> evidencias) {
         Disputa d = obrigatoria(disputaId);
         Reserva r = booking.obrigatoria(d.reservaId);
         if (!booking.ehLocatario(loc, r)) throw ApiException.proibido("Apenas o locatário contesta a avaria.");
         if (d.status != StatusDisputa.AGUARDANDO_CONTESTACAO) throw ApiException.regra("A disputa não está aberta para contestação.");
         if (clock.passou(d.contestarAte)) throw ApiException.regra("O prazo de contestação terminou.");
-        d.contestacao = new Disputa.Contestacao(req.texto().trim(), req.qtdEvidencias(), clock.now());
+        List<Arquivo> anexos = storage.salvarTodos(evidencias, CategoriaArquivo.CONTESTACAO_EVIDENCIA, loc.id, d.reservaId, false);
+        d.contestacao = new Disputa.Contestacao(req.texto().trim(), anexos.size(), clock.now(), anexos);
         mudar(d, StatusDisputa.CONTESTADA, loc.id, null);
         bus.emitir("avaria_contestada", props("reservation_id", d.reservaId, "dispute_id", disputaId));
         return d;

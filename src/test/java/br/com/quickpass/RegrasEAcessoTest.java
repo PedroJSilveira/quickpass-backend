@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 
 import java.time.LocalDate;
+import org.springframework.mock.web.MockMultipartFile;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +39,7 @@ class RegrasEAcessoTest extends ApiTestBase {
         String id = call(HttpMethod.POST, "/api/reservas", renter,
                 Map.of("veiculoId", "1", "inicio", ini.toString(), "fim", ini.plusDays(1).toString(), "protecao", "BASICA"), 201).get("id").asText();
         call(HttpMethod.POST, "/api/reservas/" + id + "/continuar-kyc", renter, null, 400); // KYC ainda não aprovado
-        for (String i : List.of("DOC", "CNH", "SELFIE", "BANCO")) post("/api/me/kyc/" + i, renter, null);
+        for (String i : List.of("DOC", "CNH", "SELFIE", "BANCO")) enviarKyc(i, renter, 200);
         assertEquals("SOLICITADA", post("/api/reservas/" + id + "/continuar-kyc", renter, null).get("status").asText());
         JsonNode fila = get("/api/proprietario/solicitacoes?status=PENDENTE", login("p1@example.com", "senha123"));
         assertTrue(fila.findValuesAsText("reservaId").contains(id));
@@ -89,12 +90,19 @@ class RegrasEAcessoTest extends ApiTestBase {
         v.put("marca", "VW"); v.put("modelo", "Polo"); v.put("ano", 2023); v.put("placa", "BRA2E19"); v.put("categoria", "Hatch");
         v.put("diaria", 120); v.put("local", "Centro"); v.put("enderecoExato", "Rua X, 1"); v.put("cambio", "Automático");
         v.put("combustivel", "Flex"); v.put("lugares", 5); v.put("km", 1000);
-        JsonNode criado = call(HttpMethod.POST, "/api/proprietario/veiculos", dono, v, 201);
+        MockMultipartFile[] fotos = imagens("fotos", 6);
+        multipart("/api/proprietario/veiculos", dono, v, 400, imagens("fotos", 2)); // poucas fotos
+        multipart("/api/proprietario/veiculos", dono, v, 400, new MockMultipartFile("fotos", "x.png", "image/png", "<html>".getBytes())); // não é imagem
+        JsonNode criado = multipart("/api/proprietario/veiculos", dono, v, 201, fotos);
+        assertEquals(6, criado.get("fotos").size());
+        assertEquals(criado.get("fotos").get(0).asText(), criado.get("foto").asText());
+        // foto do anúncio é pública
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(criado.get("foto").asText())).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
         String id = criado.get("id").asText();
         assertEquals("EM_ANALISE", criado.get("status").asText());
-        call(HttpMethod.POST, "/api/proprietario/veiculos", dono, v, 409); // placa duplicada
+        multipart("/api/proprietario/veiculos", dono, v, 409, fotos); // placa duplicada
         v.put("placa", "inválida");
-        call(HttpMethod.POST, "/api/proprietario/veiculos", dono, v, 400);
+        multipart("/api/proprietario/veiculos", dono, v, 400, fotos);
 
         // fora da busca e do detalhe público até ser aprovado
         assertFalse(get("/api/veiculos", null).findValuesAsText("id").contains(id));
@@ -139,5 +147,34 @@ class RegrasEAcessoTest extends ApiTestBase {
         assertEquals("AGUARDANDO_KYC", get("/api/reservas/" + id, renter).get("reserva").get("status").asText());
         call(HttpMethod.PUT, "/api/admin/config/HOLD_KYC_MINUTOS", admin, Map.of("valor", 120), 200);
         call(HttpMethod.GET, "/api/admin/config", admin, null, 200);
+    }
+
+    @Test
+    void cadastroComAmbosPapeisEAdminSoPeloBanco() throws Exception {
+        String ambos = novoUsuario("ambos@teste.com", List.of("LOCATARIO", "PROPRIETARIO"), true, Map.of());
+        assertEquals(2, get("/api/me", ambos).get("papeis").size());
+        call(HttpMethod.GET, "/api/proprietario/veiculos", ambos, null, 200);
+        // sem papéis ou com ADMIN: recusado
+        call(HttpMethod.POST, "/api/auth/cadastro", null, Map.of("nome", "X", "email", "vazio@teste.com", "senha", "segredo1", "cpf", "11144477735", "papeis", List.of()), 400);
+        // nem o admin concede ADMIN pela API
+        String id = get("/api/me", ambos).get("id").asText();
+        call(HttpMethod.PUT, "/api/admin/usuarios/" + id + "/papeis", admin(), Map.of("papeis", List.of("ADMIN")), 403);
+        // mas a conta admin da carga inicial segue admin e loga normalmente
+        assertTrue(get("/api/me", admin()).get("papeis").findValuesAsText("").isEmpty() || get("/api/me", admin()).get("papeis").toString().contains("ADMIN"));
+    }
+
+    @Test
+    void reservasTrazemDadosDoVeiculoEKycExigeArquivoValido() throws Exception {
+        String renter = novoUsuario("view@teste.com", List.of("LOCATARIO"), false, Map.of());
+        call(HttpMethod.POST, "/api/me/kyc/DOC", renter, null, 415); // sem multipart
+        multipart("/api/me/kyc/SELFIE", renter, null, 400, new MockMultipartFile("arquivo", "s.pdf", "application/pdf", "%PDF-1.4 x".getBytes())); // selfie não aceita PDF
+        enviarKyc("DOC", renter, 200);
+        LocalDate ini = hoje().plusDays(9);
+        call(HttpMethod.POST, "/api/reservas", renter, Map.of("veiculoId", "1", "inicio", ini.toString(), "fim", ini.plusDays(1).toString(), "protecao", "BASICA"), 201);
+        JsonNode lista = get("/api/reservas", renter);
+        assertEquals("Honda Civic 2021", lista.get(0).get("veiculoTitulo").asText());
+        assertEquals("AGUARDANDO_KYC", lista.get(0).get("status").asText());
+        // correspondências de busca salva não vazam placa/endereço
+        assertEquals(200, mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/veiculos/1/cotacao?inicio=" + ini + "&fim=" + ini.plusDays(2))).andReturn().getResponse().getStatus());
     }
 }

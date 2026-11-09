@@ -7,7 +7,12 @@ import java.util.List;
 public class Veiculo {
     public String id;
     public String titulo;
+    /** Foto de capa (primeira de {@link #fotos}); vazia só em anúncios sem upload. */
     public String foto;
+    /** Fotos do anúncio: URLs de /api/arquivos/{id} (ou assets estáticos da carga de demonstração). */
+    public List<String> fotos = new ArrayList<>();
+    /** Documentos enviados (CRLV, seguro): só o proprietário e o admin baixam. */
+    public List<Arquivo> documentos = new ArrayList<>();
     public String marca;
     public String modelo;
     public int ano;

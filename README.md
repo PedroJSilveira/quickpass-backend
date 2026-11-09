@@ -1,8 +1,8 @@
 # QuickPass — Backend (Spring Boot, mock)
 
-API REST que espelha **tudo o que o frontend Angular já faz** (`../quickpass-frontend`), com o estado
-**em memória** e os serviços externos (KYC/biometria e gateway de pagamento) **mockados**. Serve para
-desenvolver e demonstrar o frontend contra uma API real antes de existir persistência/integrações.
+API REST consumida pelo frontend Angular (`../quickpass-frontend`), com o estado **em memória** e os
+serviços externos (KYC/biometria e gateway de pagamento) **mockados**. Uploads de imagens/documentos
+são reais (multipart, gravados em `./uploads`).
 
 - Java 21 · Spring Boot 3.3 · Maven
 - Sem banco: reiniciar a aplicação restaura os dados de demonstração (`config/DadosDemo`)
@@ -12,7 +12,7 @@ desenvolver e demonstrar o frontend contra uma API real antes de existir persist
 
 ```bash
 mvn spring-boot:run      # http://localhost:8080  (CORS liberado para http://localhost:4200)
-mvn test                 # 18 testes de integração (MockMvc) cobrindo os fluxos abaixo
+mvn test                 # 20 testes de integração (MockMvc) cobrindo os fluxos abaixo
 ```
 
 Contas de demonstração (senha `senha123`, exceto o admin):
@@ -26,25 +26,26 @@ Contas de demonstração (senha `senha123`, exceto o admin):
 
 ## Papéis
 
-Um usuário pode ser **LOCATARIO**, **PROPRIETARIO** ou os dois (`PUT /api/me/papeis`); **ADMIN** só é
-concedido por outro admin (`PUT /api/admin/usuarios/{id}/papeis`). Cabeçalhos opcionais:
+Um usuário pode ser **LOCATARIO**, **PROPRIETARIO** ou os dois (`PUT /api/me/papeis`); **ADMIN** não pode ser
+concedido pela API (cadastro, `/me/papeis` e `/admin/usuarios/{id}/papeis` recusam): contas admin só
+existem direto no banco/carga inicial (`DadosDemo`). Cabeçalhos opcionais:
 `X-Papel-Ativo` (papel em uso, vai nos eventos analíticos) e `X-Session-Id`.
 
 ## Endpoints
 
 **Conta** — `POST /api/auth/cadastro` (aceita `atribuicao`: UTMs e `ref` de indicação, first-touch) · `POST /api/auth/login` · `POST /api/auth/logout` ·
-`GET /api/me` · `PUT /api/me/papeis` · `GET /api/me/kyc` · `POST /api/me/kyc/{DOC|CNH|SELFIE|BANCO}` (4 itens aprovam o KYC) ·
+`GET /api/me` · `PUT /api/me/papeis` · `GET /api/me/kyc` · `POST /api/me/kyc/{DOC|CNH|SELFIE|BANCO}` (**multipart**, parte `arquivo`: imagem ou PDF, selfie só imagem; 4 itens aprovam o KYC) ·
 `PUT /api/me/consentimentos` · `POST /api/me/sessao` · `GET /api/me/health-score?papel=`
 
 **Locatário** — `GET /api/veiculos?local&inicio&fim&categoria&precoMax` (público; sem placa/endereço exato) · `GET /api/veiculos/{id}` ·
 `GET /api/veiculos/{id}/avaliacoes` · `POST /api/reservas` · `GET /api/reservas?como=locatario|proprietario` · `GET /api/reservas/{id}` ·
 `POST /api/reservas/{id}/{continuar-kyc|pagar|cancelar}` · `GET /api/reservas/{id}/endereco` ·
-`/api/reservas/{id}/vistorias/{CHECKIN|CHECKOUT}` (`GET`, `PUT` dados, `POST fotos/{chave}`, `POST aceite`, `POST concluir`) ·
-`POST /api/reservas/{id}/avaliacoes` · `POST /api/disputas/{id}/contestacao`
+`/api/reservas/{id}/vistorias/{CHECKIN|CHECKOUT}` (`GET`, `PUT` dados, `POST fotos/{chave}` **multipart** parte `arquivo`, `POST aceite`, `POST concluir`) ·
+`POST /api/reservas/{id}/avaliacoes` · `POST /api/disputas/{id}/contestacao` (**multipart**: JSON `dados` + `evidencias`) · `GET /api/veiculos/{id}/cotacao?inicio&fim&protecao` · `GET /api/config/publica` · `GET /api/arquivos/{id}`
 
-**Proprietário** — `/api/proprietario/veiculos` (cadastrar, listar, editar) · `.../veiculos/{id}/disponibilidade` (+ `dias/{data}/alternar`) ·
+**Proprietário** — `/api/proprietario/veiculos` (cadastrar = **multipart**: JSON `dados` + `fotos` (mín. `FOTOS_VEICULO_MINIMAS`) + `documentos`, exige KYC aprovado; `POST .../{id}/fotos`, `DELETE .../{id}/fotos/{arquivoId}`) · `.../veiculos/{id}/disponibilidade` (+ `dias/{data}/alternar`) ·
 `.../template-disponibilidade` · `.../veiculos/{id}/um-toque[/previa|/desfazer]` · `.../preferencias` · `.../sugestoes-datas` · `.../recompensa` ·
-`.../simulacao-receita` · `/api/proprietario/solicitacoes` · `POST /api/reservas/{id}/{aprovar|rejeitar}` · `POST /api/reservas/{id}/avaria` ·
+`.../simulacao-receita` · `/api/proprietario/solicitacoes` · `POST /api/reservas/{id}/{aprovar|rejeitar}` · `POST /api/reservas/{id}/avaria` (**multipart**: JSON `dados` + ≥ 1 `fotos`) ·
 `/api/proprietario/{painel|ganhos}` · `/api/proprietario/demanda?regiao=` · `POST /api/proprietario/lembretes/recusar`
 
 **Hábito e growth** — `/api/buscas-salvas` (CRUD, `PATCH .../pausa`, `GET .../correspondencias`; alimenta o Radar) · `/api/notificacoes` (+ `POST .../abrir`) ·
@@ -60,7 +61,7 @@ concedido por outro admin (`PUT /api/admin/usuarios/{id}/papeis`). Cabeçalhos o
 
 - **KYC** (`MockKycProvider`): aprova ao receber os 4 itens; CNH válida por 3 anos.
 - **Pagamento** (`MockPaymentGateway`): cartão iniciado em `0000` recusa a cobrança; `0001` recusa a pré-autorização da caução; ou use `/api/admin/simulacao/gateway`.
-- **Upload de fotos**: `POST .../fotos/{chave}` só marca a foto como recebida (sem arquivo).
+- **Upload de arquivos**: real. Tipo detectado pelo conteúdo (JPG, PNG, WEBP, GIF, HEIC, AVIF; PDF onde permitido), limite de 10 MB por arquivo, gravação em `quickpass.uploads.dir`. Só as fotos do anúncio são públicas; o resto exige ser o dono, parte da reserva ou admin.
 - Valores monetários em `double` arredondado a 2 casas — suficiente para o mock; usar `BigDecimal` ao integrar um gateway real.
 
 ## Regras do frontend portadas

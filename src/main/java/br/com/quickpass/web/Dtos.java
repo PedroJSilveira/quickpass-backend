@@ -41,11 +41,11 @@ public final class Dtos {
                              @NotBlank String placa, @NotNull CategoriaVeiculo categoria, @Positive double diaria,
                              @NotBlank String local, @NotBlank String enderecoExato, @NotNull Cambio cambio,
                              @NotNull Combustivel combustivel, @Min(1) int lugares, @PositiveOrZero int km,
-                             String consumo, String foto, Double distanciaKm, LocalDate docValidoAte,
+                             String consumo, Double distanciaKm, LocalDate docValidoAte,
                              List<ItemManutencao> manutencao) {
     }
 
-    public record VeiculoAtualizacaoReq(@Positive Double diaria, String foto, String enderecoExato, @PositiveOrZero Integer km,
+    public record VeiculoAtualizacaoReq(@Positive Double diaria, String enderecoExato, @PositiveOrZero Integer km,
                                         LocalDate docValidoAte, List<ItemManutencao> manutencao) {
     }
 
@@ -70,9 +70,6 @@ public final class Dtos {
     public record PagarReq(String metodo, String numeroCartao) {
     }
 
-    public record FotoReq(String localAproximada) {
-    }
-
     public record VistoriaDadosReq(@PositiveOrZero Integer km, String combustivel, String observacoes) {
     }
 
@@ -80,10 +77,12 @@ public final class Dtos {
     }
 
     // ───────────── disputas / avaliações ─────────────
-    public record AvariaReq(@NotBlank String descricao, @Min(0) int qtdFotos, @PositiveOrZero double valorEstimado) {
+    /** Dados da avaria (parte JSON "dados" do multipart; as fotos vão na parte "fotos"). */
+    public record AvariaReq(@NotBlank String descricao, @PositiveOrZero double valorEstimado) {
     }
 
-    public record ContestacaoReq(@NotBlank String texto, @Min(0) int qtdEvidencias) {
+    /** Dados da contestação (parte JSON "dados" do multipart; as evidências vão na parte "evidencias"). */
+    public record ContestacaoReq(@NotBlank String texto) {
     }
 
     public record DecisaoReq(@NotNull TipoDecisao tipo, @PositiveOrZero double valor, @NotBlank String justificativa) {
@@ -108,7 +107,7 @@ public final class Dtos {
 
     // ───────────── respostas ─────────────
     /** Veículo como exposto na busca/público: sem endereço exato nem placa (RNF02). */
-    public record VeiculoPublico(String id, String titulo, String foto, String marca, String modelo, int ano,
+    public record VeiculoPublico(String id, String titulo, String foto, List<String> fotos, String marca, String modelo, int ano,
                                  CategoriaVeiculo categoria, double diaria, String local, double distanciaKm,
                                  Cambio cambio, Combustivel combustivel, int lugares, int km, String consumo,
                                  String proprietarioId, String proprietarioNome, String proprietarioIniciais,

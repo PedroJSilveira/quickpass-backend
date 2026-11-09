@@ -5,6 +5,7 @@ import br.com.quickpass.config.*;
 import br.com.quickpass.domain.*;
 import br.com.quickpass.web.Dtos.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -35,10 +36,11 @@ public class BookingService {
     private final ReviewService reviews;
     private final ExperimentService experimento;
     private final ReferralService referral;
+    private final StorageService storage;
 
     public BookingService(Store store, PricingService pricing, AppConfigService config, ClockService clock, AuditService audit, EventBus bus,
                           UsuarioService usuarios, PaymentGateway gateway, DepositService deposit, PayoutService payout, AgendaService agenda,
-                          ReviewService reviews, ExperimentService experimento, ReferralService referral) {
+                          ReviewService reviews, ExperimentService experimento, ReferralService referral, StorageService storage) {
         this.store = store;
         this.pricing = pricing;
         this.config = config;
@@ -53,6 +55,7 @@ public class BookingService {
         this.reviews = reviews;
         this.experimento = experimento;
         this.referral = referral;
+        this.storage = storage;
     }
 
     // ───────────── consultas ─────────────
@@ -331,10 +334,14 @@ public class BookingService {
         return v;
     }
 
-    /** Mock de upload: a foto passa a contar como confirmada pelo servidor. */
-    public Vistoria enviarFoto(Usuario u, String reservaId, TipoVistoria tipo, FotoChave chave, String localAproximada) {
+    /** Recebe a imagem da vistoria; só depois de gravada ela passa a contar como confirmada pelo servidor. */
+    public Vistoria enviarFoto(Usuario u, String reservaId, TipoVistoria tipo, FotoChave chave, MultipartFile arquivo, String localAproximada) {
         Vistoria v = editavel(u, reservaId, tipo);
+        Arquivo salvo = storage.salvar(arquivo, CategoriaArquivo.VISTORIA_FOTO, u.id, reservaId, false);
+        FotoVistoria anterior = v.fotos.get(chave);
+        if (anterior != null && anterior.arquivoId != null) storage.remover(anterior.arquivoId);
         FotoVistoria f = new FotoVistoria();
+        f.arquivoId = salvo.id;
         f.enviada = true;
         f.tiradaEm = clock.now();
         f.localAproximada = localAproximada;

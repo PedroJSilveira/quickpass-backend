@@ -1,6 +1,7 @@
 package br.com.quickpass.domain;
 
 import java.time.Instant;
+import java.util.List;
 
 public class Disputa {
     public String id;
@@ -11,9 +12,9 @@ public class Disputa {
     public Instant contestarAte;
     public DecisaoDisputa decisao;
 
-    public record Avaria(String descricao, int qtdFotos, Instant informadaEm, double valorEstimado) {
+    public record Avaria(String descricao, int qtdFotos, Instant informadaEm, double valorEstimado, List<Arquivo> fotos) {
     }
 
-    public record Contestacao(String texto, int qtdEvidencias, Instant enviadaEm) {
+    public record Contestacao(String texto, int qtdEvidencias, Instant enviadaEm, List<Arquivo> evidencias) {
     }
 }

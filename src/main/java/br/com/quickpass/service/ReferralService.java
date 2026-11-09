@@ -41,13 +41,13 @@ public class ReferralService {
         this.frontendUrl = frontendUrl;
     }
 
-    public Map<String, String> gerarLink(Usuario u) {
+    public Map<String, String> gerarLink(Usuario u, String dispositivo) {
         if (u.codigoIndicacao == null) {
             u.codigoIndicacao = "QP" + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
             bus.emitirComo(u, "referral_link_gerado", props("referrer_id", u.id, "codigo", u.codigoIndicacao));
         }
         var atual = store.identidades.get(u.id);
-        store.identidades.put(u.id, new Identidade(u.cpf, atual == null ? null : atual.dispositivo(), atual == null ? null : atual.cartao()));
+        store.identidades.put(u.id, new Identidade(u.cpf, dispositivo != null ? dispositivo : atual == null ? null : atual.dispositivo(), atual == null ? null : atual.cartao()));
         return Map.of("codigo", u.codigoIndicacao, "url", frontendUrl + "/cadastro?ref=" + u.codigoIndicacao);
     }
 

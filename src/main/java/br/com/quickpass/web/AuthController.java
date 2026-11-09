@@ -9,7 +9,9 @@ import br.com.quickpass.service.UsuarioService;
 import br.com.quickpass.web.Dtos.*;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
@@ -68,9 +70,10 @@ public class AuthController {
         return Map.of("status", u.statusKyc, "itens", u.kyc, "itensConcluidos", u.kyc.concluidos(), "validadeCnh", String.valueOf(u.validadeCnh));
     }
 
-    @PostMapping("/me/kyc/{item}")
-    public Usuario enviarKyc(@PathVariable ItemKyc item) {
-        return usuarios.enviarItemKyc(AuthContext.usuario(), item);
+    /** Envia o arquivo de um item do KYC (multipart, parte {@code arquivo}); com os 4 itens a análise é concluída. */
+    @PostMapping(value = "/me/kyc/{item}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Usuario enviarKyc(@PathVariable ItemKyc item, @RequestPart("arquivo") MultipartFile arquivo) {
+        return usuarios.enviarItemKyc(AuthContext.usuario(), item, arquivo);
     }
 
     @PutMapping("/me/consentimentos")

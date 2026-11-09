@@ -19,6 +19,8 @@ public class Store {
     /** token → userId */
     public final Map<String, String> tokens = new HashMap<>();
     public final Map<String, Veiculo> veiculos = new LinkedHashMap<>();
+    /** id → metadados dos arquivos enviados (conteúdo em disco). */
+    public final Map<String, Arquivo> arquivos = new LinkedHashMap<>();
     public final Map<String, Disponibilidade> disponibilidades = new HashMap<>();
     public final Map<String, TemplateDisponibilidade> templates = new HashMap<>(); // por proprietário
     public final Map<String, PreferenciasAnuncio> preferencias = new HashMap<>(); // por veículo

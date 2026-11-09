@@ -2,6 +2,7 @@ package br.com.quickpass.web;
 
 import br.com.quickpass.config.AuthContext;
 import br.com.quickpass.domain.*;
+import br.com.quickpass.service.CatalogService;
 import br.com.quickpass.service.NotificationService;
 import br.com.quickpass.service.ReferralService;
 import br.com.quickpass.service.SavedSearchService;
@@ -20,11 +21,13 @@ public class HabitoController {
     private final SavedSearchService buscas;
     private final NotificationService notificacoes;
     private final ReferralService referral;
+    private final CatalogService catalog;
 
-    public HabitoController(SavedSearchService buscas, NotificationService notificacoes, ReferralService referral) {
+    public HabitoController(SavedSearchService buscas, NotificationService notificacoes, ReferralService referral, CatalogService catalog) {
         this.buscas = buscas;
         this.notificacoes = notificacoes;
         this.referral = referral;
+        this.catalog = catalog;
     }
 
     // ───────────── buscas salvas / radar ─────────────
@@ -51,11 +54,11 @@ public class HabitoController {
         buscas.excluir(AuthContext.exigir(Papel.LOCATARIO), id);
     }
 
-    /** Veículos que atendem à busca salva agora. */
+    /** Veículos que atendem à busca salva agora (visão pública: sem placa nem endereço exato — RNF02). */
     @GetMapping("/buscas-salvas/{id}/correspondencias")
-    public List<Veiculo> correspondencias(@PathVariable String id) {
+    public List<Dtos.VeiculoPublico> correspondencias(@PathVariable String id) {
         Usuario u = AuthContext.exigir(Papel.LOCATARIO);
-        return buscas.correspondencias(buscas.obrigatoria(u, id)).stream().toList();
+        return buscas.correspondencias(buscas.obrigatoria(u, id)).stream().map(catalog::publico).toList();
     }
 
     // ───────────── notificações ─────────────
@@ -78,8 +81,8 @@ public class HabitoController {
 
     /** Link individual de indicação do usuário. */
     @GetMapping("/indicacoes/link")
-    public Map<String, String> link() {
-        return referral.gerarLink(AuthContext.usuario());
+    public Map<String, String> link(@RequestParam(required = false) String dispositivo) {
+        return referral.gerarLink(AuthContext.usuario(), dispositivo);
     }
 
     @GetMapping("/indicacoes")

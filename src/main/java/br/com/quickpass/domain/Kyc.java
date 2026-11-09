@@ -1,7 +1,14 @@
 package br.com.quickpass.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import java.util.EnumMap;
+import java.util.Map;
+
 public class Kyc {
     public boolean doc, cnh, selfie, banco, aprovado;
+    /** Último arquivo enviado por item (não exposto na API; o admin baixa por /api/arquivos). */
+    @JsonIgnore public Map<ItemKyc, String> arquivos = new EnumMap<>(ItemKyc.class);
 
     public boolean item(ItemKyc i) {
         return switch (i) { case DOC -> doc; case CNH -> cnh; case SELFIE -> selfie; case BANCO -> banco; };

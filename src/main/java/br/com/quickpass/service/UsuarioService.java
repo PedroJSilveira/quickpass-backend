@@ -6,6 +6,7 @@ import br.com.quickpass.domain.*;
 import br.com.quickpass.web.Dtos.*;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -33,9 +34,10 @@ public class UsuarioService {
     private final AuditService audit;
     private final ReferralService referral;
     private final NotificationService notificacoes;
+    private final StorageService storage;
 
     public UsuarioService(Store store, ClockService clock, AppConfigService config, KycProvider kycProvider, EventBus bus,
-                          AuditService audit, ReferralService referral, NotificationService notificacoes) {
+                          AuditService audit, ReferralService referral, NotificationService notificacoes, StorageService storage) {
         this.store = store;
         this.clock = clock;
         this.config = config;
@@ -44,6 +46,7 @@ public class UsuarioService {
         this.audit = audit;
         this.referral = referral;
         this.notificacoes = notificacoes;
+        this.storage = storage;
     }
 
     // ───────────── cadastro / sessão ─────────────
@@ -127,15 +130,34 @@ public class UsuarioService {
         return u;
     }
 
+    /**
+     * Admin ajusta os papéis de locatário/proprietário de outro usuário. ADMIN nunca é concedido
+     * pela API (contas admin só nascem na carga inicial/banco); quem já é admin continua sendo.
+     */
     public Usuario definirPapeisAdmin(String id, Set<Papel> novos) {
+        if (novos.contains(Papel.ADMIN)) throw ApiException.proibido("O papel ADMIN não pode ser concedido pela API: contas admin só são criadas direto no banco.");
         Usuario u = obrigatorio(id);
-        u.papeis = novos.isEmpty() ? EnumSet.noneOf(Papel.class) : EnumSet.copyOf(novos);
+        EnumSet<Papel> resultado = novos.isEmpty() ? EnumSet.noneOf(Papel.class) : EnumSet.copyOf(novos);
+        if (u.temPapel(Papel.ADMIN)) resultado.add(Papel.ADMIN);
+        u.papeis = resultado;
         return u;
     }
 
     // ───────────── KYC (RF02) ─────────────
 
-    public Usuario enviarItemKyc(Usuario u, ItemKyc item) {
+    /** Recebe o arquivo do item (documento, CNH, selfie ou comprovante bancário) e, com os 4 itens, conclui a análise. */
+    public Usuario enviarItemKyc(Usuario u, ItemKyc item, MultipartFile arquivo) {
+        if (u.temPapel(Papel.ADMIN) && u.papeis.size() == 1) throw ApiException.regra("Contas administrativas não passam por verificação de identidade.");
+        CategoriaArquivo cat = switch (item) {
+            case DOC -> CategoriaArquivo.KYC_DOC;
+            case CNH -> CategoriaArquivo.KYC_CNH;
+            case SELFIE -> CategoriaArquivo.KYC_SELFIE;
+            case BANCO -> CategoriaArquivo.KYC_BANCO;
+        };
+        // A selfie precisa ser imagem; os demais aceitam também PDF.
+        Arquivo salvo = storage.salvar(arquivo, cat, u.id, null, item != ItemKyc.SELFIE);
+        String anterior = u.kyc.arquivos.put(item, salvo.id);
+        if (anterior != null) storage.remover(anterior);
         StatusKyc antes = u.statusKyc;
         u.kyc.marcar(item);
         if (antes == StatusKyc.PENDENTE || antes == StatusKyc.REPROVADO || antes == StatusKyc.EXPIRADO) {
