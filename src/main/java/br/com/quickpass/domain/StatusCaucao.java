@@ -1,0 +1,5 @@
+package br.com.quickpass.domain;
+
+public enum StatusCaucao {
+    PENDENTE_PRE_AUTORIZACAO, PRE_AUTORIZADA, FALHA, RETIDA_EM_DISPUTA, CAPTURADA_TOTAL, CAPTURADA_PARCIAL, LIBERADA
+}
